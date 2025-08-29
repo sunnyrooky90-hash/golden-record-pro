@@ -12,15 +12,17 @@
         .lucide { width: 24px; height: 24px; stroke: currentColor; stroke-width: 2; fill: none; }
         .lucide-sm { width: 16px; height: 16px; }
         .lucide-lg { width: 32px; height: 32px; }
+        .table-row-selected { background-color: #dbeafe; }
+        .drag-active { border-color: #3b82f6 !important; background-color: #eff6ff !important; }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useCallback } = React;
 
-        // Lucide React Icons (simplified)
+        // Lucide React Icons
         const LucideIcon = ({ name, className = "lucide", ...props }) => {
             const icons = {
                 Database: () => (
@@ -92,6 +94,15 @@
                         <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/>
                     </svg>
                 ),
+                Trash2: () => (
+                    <svg className={className} {...props} viewBox="0 0 24 24">
+                        <path d="M3 6h18"/>
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                        <line x1="10" y1="11" x2="10" y2="17"/>
+                        <line x1="14" y1="11" x2="14" y2="17"/>
+                    </svg>
+                ),
                 X: () => (
                     <svg className={className} {...props} viewBox="0 0 24 24">
                         <path d="M18 6 6 18"/>
@@ -108,22 +119,137 @@
                         <path d="m9 18 6-6-6-6"/>
                     </svg>
                 ),
+                Filter: () => (
+                    <svg className={className} {...props} viewBox="0 0 24 24">
+                        <polygon points="22,3 2,3 10,12.46 10,19 14,21 14,12.46"/>
+                    </svg>
+                ),
+                SortAsc: () => (
+                    <svg className={className} {...props} viewBox="0 0 24 24">
+                        <path d="M3 6h18"/>
+                        <path d="M7 12h10"/>
+                        <path d="M10 18h4"/>
+                    </svg>
+                ),
+                Plus: () => (
+                    <svg className={className} {...props} viewBox="0 0 24 24">
+                        <path d="M5 12h14"/>
+                        <path d="M12 5v14"/>
+                    </svg>
+                ),
+                Settings: () => (
+                    <svg className={className} {...props} viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                ),
             };
             
             const Icon = icons[name];
             return Icon ? <Icon /> : <div className={className}>{name}</div>;
         };
 
-        // Mock data and utilities
+        // Utility functions
+        const saveToLocalStorage = (key, data) => {
+            try {
+                localStorage.setItem(key, JSON.stringify(data));
+            } catch (error) {
+                console.error('Failed to save to localStorage:', error);
+            }
+        };
+
+        const loadFromLocalStorage = (key, defaultValue) => {
+            try {
+                const stored = localStorage.getItem(key);
+                return stored ? JSON.parse(stored) : defaultValue;
+            } catch (error) {
+                console.error('Failed to load from localStorage:', error);
+                return defaultValue;
+            }
+        };
+
+        // CSV parsing utility
+        const parseCSV = (text) => {
+            const lines = text.split('\n');
+            if (lines.length < 2) return [];
+            
+            const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+            const products = [];
+            
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                
+                const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+                const product = { id: Date.now() + i };
+                
+                headers.forEach((header, index) => {
+                    const value = values[index] || '';
+                    // Convert numeric values
+                    if (header.toLowerCase().includes('price') || header.toLowerCase().includes('cost')) {
+                        product[header.toLowerCase()] = parseFloat(value) || 0;
+                    } else {
+                        product[header.toLowerCase()] = value;
+                    }
+                });
+                
+                // Ensure required fields
+                if (!product.status) product.status = 'active';
+                if (!product.sku) product.sku = `AUTO_${Date.now() + i}`;
+                if (!product.name) product.name = 'Unnamed Product';
+                
+                products.push(product);
+            }
+            
+            return products;
+        };
+
+        // Export functions
+        const exportToCSV = (data, filename) => {
+            if (!data.length) return;
+            
+            const headers = Object.keys(data[0]);
+            const csvContent = [
+                headers.join(','),
+                ...data.map(row => headers.map(header => `"${row[header] || ''}"`).join(','))
+            ].join('\n');
+            
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        };
+
+        const exportToJSON = (data, filename) => {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        };
+
+        // Mock data
         const generateMockProducts = () => [
-            { id: 1, sku: 'LAPTOP001', name: 'MacBook Pro 13"', brand: 'Apple', category: 'Laptops', price: 1299, description: 'Apple MacBook Pro 13-inch with M1 chip', status: 'active' },
-            { id: 2, sku: 'LAPTOP001A', name: 'MacBook Pro 13 inch', brand: 'Apple', category: 'Computers', price: 1299, description: 'Apple MacBook Pro 13" M1 processor', status: 'active' },
-            { id: 3, sku: 'PHONE001', name: 'iPhone 14', brand: 'Apple', category: 'Smartphones', price: 999, description: 'Latest iPhone 14 smartphone', status: 'active' },
-            { id: 4, sku: 'PHONE001B', name: 'iPhone 14 Pro', brand: 'Apple', category: 'Mobile Phones', price: 1099, description: 'iPhone 14 Pro with advanced camera', status: 'active' },
-            { id: 5, sku: 'TABLET001', name: 'Samsung Galaxy Tab', brand: 'Samsung', category: 'Tablets', price: 599, description: 'Samsung Galaxy tablet with S Pen', status: 'active' },
-            { id: 6, sku: 'WATCH001', name: 'Apple Watch Series 8', brand: 'Apple', category: 'Wearables', price: 399, description: 'Apple Watch with health monitoring', status: 'active' },
+            { id: 1, sku: 'LAPTOP001', name: 'MacBook Pro 13"', brand: 'Apple', category: 'Laptops', price: 1299, description: 'Apple MacBook Pro 13-inch with M1 chip', status: 'active', inventory: 15, supplier: 'Apple Inc' },
+            { id: 2, sku: 'LAPTOP001A', name: 'MacBook Pro 13 inch', brand: 'Apple', category: 'Computers', price: 1299, description: 'Apple MacBook Pro 13" M1 processor', status: 'active', inventory: 12, supplier: 'Apple Inc' },
+            { id: 3, sku: 'PHONE001', name: 'iPhone 14', brand: 'Apple', category: 'Smartphones', price: 999, description: 'Latest iPhone 14 smartphone', status: 'active', inventory: 25, supplier: 'Apple Inc' },
+            { id: 4, sku: 'PHONE001B', name: 'iPhone 14 Pro', brand: 'Apple', category: 'Mobile Phones', price: 1099, description: 'iPhone 14 Pro with advanced camera', status: 'active', inventory: 18, supplier: 'Apple Inc' },
+            { id: 5, sku: 'TABLET001', name: 'Samsung Galaxy Tab', brand: 'Samsung', category: 'Tablets', price: 599, description: 'Samsung Galaxy tablet with S Pen', status: 'active', inventory: 8, supplier: 'Samsung Electronics' },
+            { id: 6, sku: 'WATCH001', name: 'Apple Watch Series 8', brand: 'Apple', category: 'Wearables', price: 399, description: 'Apple Watch with health monitoring', status: 'active', inventory: 30, supplier: 'Apple Inc' },
+            { id: 7, sku: 'LAPTOP002', name: 'Dell XPS 13', brand: 'Dell', category: 'Laptops', price: 1199, description: 'Dell XPS 13 ultrabook', status: 'active', inventory: 10, supplier: 'Dell Technologies' },
+            { id: 8, sku: 'PHONE002', name: 'Samsung Galaxy S23', brand: 'Samsung', category: 'Smartphones', price: 899, description: 'Samsung Galaxy S23 flagship phone', status: 'active', inventory: 22, supplier: 'Samsung Electronics' },
         ];
 
+        // Duplicate detection algorithms
         const levenshteinDistance = (str1, str2) => {
             const matrix = [];
             for (let i = 0; i <= str2.length; i++) matrix[i] = [i];
@@ -250,22 +376,50 @@
         const App = () => {
             const [currentView, setCurrentView] = useState('dashboard');
             const [user, setUser] = useState({ name: 'John Doe', role: 'Data Steward' });
-            const [products, setProducts] = useState(generateMockProducts());
+            const [products, setProducts] = useState(() => loadFromLocalStorage('products', generateMockProducts()));
             const [duplicateGroups, setDuplicateGroups] = useState([]);
-            const [searchQuery, setSearchQuery] = useState('');
-            const [selectedFile, setSelectedFile] = useState(null);
+            const [selectedProducts, setSelectedProducts] = useState(new Set());
+            const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+            const [filterConfig, setFilterConfig] = useState({ category: 'all', status: 'all', priceRange: { min: '', max: '' } });
+            
+            // Save products to localStorage whenever they change
+            useEffect(() => {
+                saveToLocalStorage('products', products);
+            }, [products]);
 
             useEffect(() => {
                 const groups = findDuplicateGroups(products);
                 setDuplicateGroups(groups);
+                saveToLocalStorage('duplicateGroups', groups);
             }, [products]);
 
             const stats = useMemo(() => ({
                 totalProducts: products.length,
                 duplicateGroups: duplicateGroups.length,
                 goldenRecordsFinalized: duplicateGroups.filter(g => g.status === 'finalized').length,
-                goldenRecordPercentage: duplicateGroups.length > 0 ? Math.round((duplicateGroups.filter(g => g.status === 'finalized').length / duplicateGroups.length) * 100) : 0
+                goldenRecordPercentage: duplicateGroups.length > 0 ? Math.round((duplicateGroups.filter(g => g.status === 'finalized').length / duplicateGroups.length) * 100) : 0,
+                averagePrice: products.length > 0 ? Math.round(products.reduce((sum, p) => sum + (p.price || 0), 0) / products.length) : 0,
+                lowInventoryItems: products.filter(p => p.inventory && p.inventory < 10).length,
+                uniqueCategories: [...new Set(products.map(p => p.category))].length,
+                uniqueBrands: [...new Set(products.map(p => p.brand))].length,
             }), [products, duplicateGroups]);
+
+            // Bulk operations
+            const deleteSelectedProducts = () => {
+                if (selectedProducts.size === 0) return;
+                if (confirm(`Delete ${selectedProducts.size} selected products?`)) {
+                    setProducts(products.filter(p => !selectedProducts.has(p.id)));
+                    setSelectedProducts(new Set());
+                }
+            };
+
+            const bulkUpdateStatus = (newStatus) => {
+                if (selectedProducts.size === 0) return;
+                setProducts(products.map(p => 
+                    selectedProducts.has(p.id) ? { ...p, status: newStatus } : p
+                ));
+                setSelectedProducts(new Set());
+            };
 
             // Navigation Component
             const Navigation = () => (
@@ -274,597 +428,92 @@
                         <div className="flex justify-between h-16">
                             <div className="flex">
                                 <div className="flex-shrink-0 flex items-center">
-                                    <LucideIcon name="Database" className="lucide lg text-blue-600" />
+                                    <LucideIcon name="Database" className="lucide-lg text-blue-600" />
                                     <span className="ml-2 text-xl font-semibold text-gray-900">GoldenRecord Pro</span>
+                                    <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">Enhanced</span>
                                 </div>
                                 <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
                                     {[
                                         { id: 'dashboard', label: 'Dashboard', icon: 'FileText' },
-                                        { id: 'duplicates', label: 'Duplicates', icon: 'AlertTriangle' },
-                                        { id: 'products', label: 'Products', icon: 'Database' },
+                                        { id: 'duplicates', label: 'Duplicates', icon: 'AlertTriangle', badge: duplicateGroups.filter(g => g.status === 'pending').length },
+                                        { id: 'products', label: 'Products', icon: 'Database', badge: products.length },
                                         { id: 'upload', label: 'Upload', icon: 'Upload' }
-                                    ].map(({ id, label, icon }) => (
+                                    ].map(({ id, label, icon, badge }) => (
                                         <button
                                             key={id}
                                             onClick={() => setCurrentView(id)}
-                                            className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
+                                            className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium relative ${
                                                 currentView === id
                                                     ? 'border-blue-500 text-gray-900'
                                                     : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
                                             }`}
                                         >
-                                            <LucideIcon name={icon} className="lucide sm mr-1" />
+                                            <LucideIcon name={icon} className="lucide-sm mr-1" />
                                             {label}
+                                            {badge > 0 && (
+                                                <span className="ml-1 px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
+                                                    {badge}
+                                                </span>
+                                            )}
                                         </button>
                                     ))}
                                 </div>
                             </div>
-                            <div className="flex items-center">
+                            <div className="flex items-center space-x-4">
+                                <button
+                                    onClick={() => {
+                                        if (confirm('Clear all data and reset to defaults?')) {
+                                            localStorage.clear();
+                                            setProducts(generateMockProducts());
+                                            setSelectedProducts(new Set());
+                                        }
+                                    }}
+                                    className="text-sm text-gray-500 hover:text-gray-700"
+                                >
+                                    <LucideIcon name="Settings" className="lucide-sm" />
+                                </button>
                                 <span className="text-sm text-gray-700">Welcome, {user.name} ({user.role})</span>
-                                <LucideIcon name="Users" className="lucide ml-2 text-gray-400" />
+                                <LucideIcon name="Users" className="lucide-sm text-gray-400" />
                             </div>
                         </div>
                     </div>
                 </nav>
             );
 
-            // Dashboard Component
+            // Enhanced Dashboard Component
             const Dashboard = () => (
                 <div className="space-y-6">
+                    {/* Main Stats */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                         {[
-                            { title: 'Total Products', value: stats.totalProducts, icon: 'Database', color: 'blue' },
-                            { title: 'Duplicate Groups', value: stats.duplicateGroups, icon: 'AlertTriangle', color: 'yellow' },
-                            { title: 'Golden Records Finalized', value: stats.goldenRecordsFinalized, icon: 'CheckCircle', color: 'green' },
-                            { title: 'Completion Rate', value: `${stats.goldenRecordPercentage}%`, icon: 'FileText', color: 'purple' }
-                        ].map(({ title, value, icon, color }) => (
-                            <div key={title} className="bg-white rounded-lg shadow p-6">
-                                <div className="flex items-center">
-                                    <div className={`flex-shrink-0 p-3 rounded-md bg-${color}-100`}>
-                                        <LucideIcon name={icon} className={`lucide text-${color}-600`} />
+                            { title: 'Total Products', value: stats.totalProducts, icon: 'Database', color: 'blue', change: '+12%' },
+                            { title: 'Duplicate Groups', value: stats.duplicateGroups, icon: 'AlertTriangle', color: 'yellow', change: '-5%' },
+                            { title: 'Golden Records', value: stats.goldenRecordsFinalized, icon: 'CheckCircle', color: 'green', change: '+8%' },
+                            { title: 'Completion Rate', value: `${stats.goldenRecordPercentage}%`, icon: 'FileText', color: 'purple', change: '+15%' }
+                        ].map(({ title, value, icon, color, change }) => (
+                            <div key={title} className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-600">{title}</p>
+                                        <p className="text-2xl font-bold text-gray-900">{value}</p>
+                                        <p className={`text-xs ${change.startsWith('+') ? 'text-green-600' : 'text-red-600'}`}>
+                                            {change} from last month
+                                        </p>
                                     </div>
-                                    <div className="ml-4">
-                                        <h3 className="text-lg font-medium text-gray-900">{title}</h3>
-                                        <p className="text-2xl font-semibold text-gray-600">{value}</p>
+                                    <div className={`p-3 rounded-full bg-${color}-100`}>
+                                        <LucideIcon name={icon} className={`lucide text-${color}-600`} />
                                     </div>
                                 </div>
                             </div>
                         ))}
                     </div>
 
-                    <div className="bg-white rounded-lg shadow">
-                        <div className="px-6 py-4 border-b border-gray-200">
-                            <h3 className="text-lg font-medium text-gray-900">Recent Activity</h3>
-                        </div>
-                        <div className="divide-y divide-gray-200">
-                            {duplicateGroups.slice(0, 5).map(group => (
-                                <div key={group.id} className="px-6 py-4 flex items-center justify-between">
-                                    <div>
-                                        <p className="text-sm font-medium text-gray-900">
-                                            Duplicate group found: {group.products[0].name}
-                                        </p>
-                                        <p className="text-sm text-gray-500">
-                                            {group.products.length} products, {group.confidence}% confidence
-                                        </p>
-                                    </div>
-                                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                        group.status === 'finalized' 
-                                            ? 'bg-green-100 text-green-800' 
-                                            : 'bg-yellow-100 text-yellow-800'
-                                    }`}>
-                                        {group.status}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            );
-
-            // Duplicate Groups Management
-            const DuplicateGroups = () => {
-                const [selectedGroup, setSelectedGroup] = useState(null);
-                const [expandedGroups, setExpandedGroups] = useState(new Set());
-
-                const toggleExpanded = (groupId) => {
-                    const newExpanded = new Set(expandedGroups);
-                    if (newExpanded.has(groupId)) {
-                        newExpanded.delete(groupId);
-                    } else {
-                        newExpanded.add(groupId);
-                    }
-                    setExpandedGroups(newExpanded);
-                };
-
-                const finalizeGroup = (groupId) => {
-                    setDuplicateGroups(groups => 
-                        groups.map(g => g.id === groupId ? { ...g, status: 'finalized' } : g)
-                    );
-                    setSelectedGroup(null);
-                };
-
-                return (
-                    <div className="space-y-6">
-                        <div className="bg-white rounded-lg shadow">
-                            <div className="px-6 py-4 border-b border-gray-200">
-                                <h3 className="text-lg font-medium text-gray-900">Duplicate Groups Requiring Review</h3>
-                                <p className="text-sm text-gray-500 mt-1">
-                                    {duplicateGroups.filter(g => g.status === 'pending').length} groups pending review
-                                </p>
-                            </div>
-                            
-                            <div className="divide-y divide-gray-200">
-                                {duplicateGroups.map(group => (
-                                    <div key={group.id} className="p-6">
-                                        <div className="flex items-center justify-between mb-4">
-                                            <div className="flex items-center">
-                                                <button
-                                                    onClick={() => toggleExpanded(group.id)}
-                                                    className="mr-2 p-1 hover:bg-gray-100 rounded"
-                                                >
-                                                    {expandedGroups.has(group.id) ? 
-                                                        <LucideIcon name="ChevronDown" className="lucide sm" /> : 
-                                                        <LucideIcon name="ChevronRight" className="lucide sm" />
-                                                    }
-                                                </button>
-                                                <div>
-                                                    <h4 className="font-medium text-gray-900">
-                                                        Group {group.id.split('_')[1]} - {group.products[0].name}
-                                                    </h4>
-                                                    <p className="text-sm text-gray-500">
-                                                        {group.products.length} products, {group.confidence}% confidence
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center space-x-2">
-                                                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                                    group.status === 'finalized' 
-                                                        ? 'bg-green-100 text-green-800' 
-                                                        : 'bg-yellow-100 text-yellow-800'
-                                                }`}>
-                                                    {group.status}
-                                                </span>
-                                                <button
-                                                    onClick={() => setSelectedGroup(group)}
-                                                    className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-                                                >
-                                                    Review
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        {expandedGroups.has(group.id) && (
-                                            <div className="bg-gray-50 rounded-lg p-4">
-                                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                                                    {group.products.map(product => (
-                                                        <div key={product.id} className={`bg-white p-3 rounded border ${
-                                                            product.id === group.suggestedGolden.id ? 'border-green-500 bg-green-50' : ''
-                                                        }`}>
-                                                            {product.id === group.suggestedGolden.id && (
-                                                                <div className="flex items-center mb-2 text-sm text-green-700">
-                                                                    <LucideIcon name="CheckCircle" className="lucide sm mr-1" />
-                                                                    Suggested Golden Record
-                                                                </div>
-                                                            )}
-                                                            <div className="space-y-1 text-sm">
-                                                                <div><strong>SKU:</strong> {product.sku}</div>
-                                                                <div><strong>Name:</strong> {product.name}</div>
-                                                                <div><strong>Brand:</strong> {product.brand}</div>
-                                                                <div><strong>Price:</strong> ${product.price}</div>
-                                                                <div><strong>Category:</strong> {product.category}</div>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Review Modal */}
-                        {selectedGroup && (
-                            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                                <div className="bg-white rounded-lg max-w-6xl w-full max-h-full overflow-auto">
-                                    <div className="p-6 border-b border-gray-200">
-                                        <div className="flex items-center justify-between">
-                                            <h3 className="text-lg font-medium">Review Duplicate Group</h3>
-                                            <button
-                                                onClick={() => setSelectedGroup(null)}
-                                                className="p-2 hover:bg-gray-100 rounded"
-                                            >
-                                                <LucideIcon name="X" className="lucide" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="p-6">
-                                        <div className="mb-6">
-                                            <h4 className="font-medium mb-2">Suggested Golden Record</h4>
-                                            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                                                    <div><strong>SKU:</strong> {selectedGroup.suggestedGolden.sku}</div>
-                                                    <div><strong>Name:</strong> {selectedGroup.suggestedGolden.name}</div>
-                                                    <div><strong>Brand:</strong> {selectedGroup.suggestedGolden.brand}</div>
-                                                    <div><strong>Price:</strong> ${selectedGroup.suggestedGolden.price}</div>
-                                                    <div><strong>Category:</strong> {selectedGroup.suggestedGolden.category}</div>
-                                                    <div><strong>Description:</strong> {selectedGroup.suggestedGolden.description}</div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="mb-6">
-                                            <h4 className="font-medium mb-2">All Products in Group</h4>
-                                            <div className="space-y-3">
-                                                {selectedGroup.products.map(product => (
-                                                    <div key={product.id} className="bg-gray-50 rounded-lg p-4">
-                                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                                                            <div><strong>SKU:</strong> {product.sku}</div>
-                                                            <div><strong>Name:</strong> {product.name}</div>
-                                                            <div><strong>Brand:</strong> {product.brand}</div>
-                                                            <div><strong>Price:</strong> ${product.price}</div>
-                                                            <div><strong>Category:</strong> {product.category}</div>
-                                                            <div><strong>Description:</strong> {product.description}</div>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        <div className="flex justify-end space-x-3">
-                                            <button
-                                                onClick={() => setSelectedGroup(null)}
-                                                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-                                            >
-                                                Cancel
-                                            </button>
-                                            <button
-                                                onClick={() => finalizeGroup(selectedGroup.id)}
-                                                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-                                            >
-                                                Approve Golden Record
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                );
-            };
-
-            // Products List Component
-            const ProductsList = () => {
-                const [localSearchQuery, setLocalSearchQuery] = useState('');
-                
-                const filteredProducts = products.filter(product => {
-                    const query = localSearchQuery.toLowerCase();
-                    return (
-                        product.name.toLowerCase().includes(query) ||
-                        product.sku.toLowerCase().includes(query) ||
-                        product.brand.toLowerCase().includes(query) ||
-                        product.category.toLowerCase().includes(query) ||
-                        product.description.toLowerCase().includes(query) ||
-                        product.price.toString().includes(query) ||
-                        product.status.toLowerCase().includes(query)
-                    );
-                });
-
-                return (
-                    <div className="space-y-6">
-                        <div className="flex justify-between items-center">
-                            <div className="relative">
-                                <LucideIcon name="Search" className="lucide absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Search by name, SKU, brand, category, price, description..."
-                                    value={localSearchQuery}
-                                    onChange={(e) => setLocalSearchQuery(e.target.value)}
-                                    className="pl-10 pr-4 py-2 w-80 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                />
-                                {localSearchQuery && (
-                                    <button
-                                        onClick={() => setLocalSearchQuery('')}
-                                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                                    >
-                                        <LucideIcon name="X" className="lucide sm" />
-                                    </button>
-                                )}
-                            </div>
-                            <div className="flex items-center space-x-2">
-                                <span className="text-sm text-gray-500">
-                                    {filteredProducts.length} of {products.length} products
-                                </span>
-                                <button 
-                                    className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                                    onClick={() => {
-                                        const goldenRecords = products.filter(p => p.status === 'active');
-                                        alert(`Exporting ${goldenRecords.length} golden records...`);
-                                    }}
-                                >
-                                    <LucideIcon name="Download" className="lucide sm mr-2" />
-                                    Export Golden Records
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="bg-white shadow rounded-lg overflow-hidden">
-                            <table className="min-w-full divide-y divide-gray-200">
-                                <thead className="bg-gray-50">
-                                    <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Brand</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
-                                    {filteredProducts.map(product => (
-                                        <tr key={product.id} className="hover:bg-gray-50">
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="text-sm font-medium text-gray-900">{product.name}</div>
-                                                <div className="text-sm text-gray-500">{product.description}</div>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{product.sku}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{product.brand}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${product.price}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{product.category}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                                                    {product.status}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                                                <button 
-                                                    className="text-blue-600 hover:text-blue-900"
-                                                    onClick={() => alert(`Viewing details for: ${product.name}`)}
-                                                >
-                                                    <LucideIcon name="Eye" className="lucide sm" />
-                                                </button>
-                                                <button 
-                                                    className="text-gray-600 hover:text-gray-900"
-                                                    onClick={() => alert(`Editing: ${product.name}`)}
-                                                >
-                                                    <LucideIcon name="Edit" className="lucide sm" />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                );
-            };
-
-            // Upload Component
-            const UploadComponent = () => {
-                const [dragActive, setDragActive] = useState(false);
-                
-                const handleFiles = (files) => {
-                    if (files.length > 0) {
-                        const file = files[0];
-                        if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
-                            setSelectedFile(file);
-                        } else {
-                            alert('Please select a CSV file');
-                        }
-                    }
-                };
-
-                const handleFileChange = (e) => {
-                    handleFiles(e.target.files);
-                };
-
-                const handleDrag = (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (e.type === "dragenter" || e.type === "dragover") {
-                        setDragActive(true);
-                    } else if (e.type === "dragleave") {
-                        setDragActive(false);
-                    }
-                };
-
-                const handleDrop = (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setDragActive(false);
-                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                        handleFiles(e.dataTransfer.files);
-                    }
-                };
-
-                const handleUpload = () => {
-                    if (selectedFile) {
-                        // Simulate processing the CSV file
-                        const reader = new FileReader();
-                        reader.onload = function(e) {
-                            // In a real app, you'd parse the CSV here
-                            const newProducts = [
-                                { 
-                                    id: Date.now(), 
-                                    sku: 'UPLOAD001', 
-                                    name: 'Uploaded Product 1', 
-                                    brand: 'Test Brand', 
-                                    category: 'Electronics', 
-                                    price: 199, 
-                                    description: `Uploaded from ${selectedFile.name}`, 
-                                    status: 'active' 
-                                },
-                                { 
-                                    id: Date.now() + 1, 
-                                    sku: 'UPLOAD002', 
-                                    name: 'Uploaded Product 2', 
-                                    brand: 'Test Brand', 
-                                    category: 'Electronics', 
-                                    price: 299, 
-                                    description: `Another product from ${selectedFile.name}`, 
-                                    status: 'active' 
-                                }
-                            ];
-                            setProducts(prevProducts => [...prevProducts, ...newProducts]);
-                            setSelectedFile(null);
-                            alert(`Successfully uploaded ${newProducts.length} products from ${selectedFile.name}! Check the Products tab to see them.`);
-                        };
-                        reader.readAsText(selectedFile);
-                    }
-                };
-
-                const removeFile = () => {
-                    setSelectedFile(null);
-                };
-
-                return (
-                    <div className="space-y-6">
+                    {/* Additional Stats */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                         <div className="bg-white rounded-lg shadow p-6">
-                            <h3 className="text-lg font-medium text-gray-900 mb-4">Upload Product Data</h3>
-                            
-                            <div 
-                                className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
-                                    dragActive ? 'border-blue-400 bg-blue-50' : 'border-gray-300'
-                                }`}
-                                onDragEnter={handleDrag}
-                                onDragLeave={handleDrag}
-                                onDragOver={handleDrag}
-                                onDrop={handleDrop}
-                            >
-                                <div className="text-center">
-                                    <LucideIcon name="Upload" className="lucide lg mx-auto text-gray-400" />
-                                    <div className="mt-4">
-                                        <label htmlFor="file-upload" className="cursor-pointer">
-                                            <span className="mt-2 block text-sm font-medium text-gray-900">
-                                                Click to upload or drag and drop a CSV file
-                                            </span>
-                                            <input 
-                                                id="file-upload" 
-                                                name="file-upload" 
-                                                type="file" 
-                                                accept=".csv,text/csv" 
-                                                className="sr-only" 
-                                                onChange={handleFileChange}
-                                                onClick={(e) => e.target.value = null} // Allow re-selecting same file
-                                            />
-                                        </label>
-                                        <p className="mt-1 text-sm text-gray-500">CSV files up to 10MB</p>
-                                        <p className="mt-1 text-xs text-gray-400">
-                                            Expected columns: sku, name, brand, category, price, description
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {selectedFile && (
-                                <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center space-x-3">
-                                            <LucideIcon name="FileText" className="lucide text-blue-600" />
-                                            <div>
-                                                <p className="text-sm font-medium text-blue-900">{selectedFile.name}</p>
-                                                <p className="text-sm text-blue-700">
-                                                    {(selectedFile.size / 1024).toFixed(2)} KB • Last modified: {new Date(selectedFile.lastModified).toLocaleDateString()}
-                                                </p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <button
-                                                onClick={removeFile}
-                                                className="p-1 text-gray-400 hover:text-gray-600"
-                                                title="Remove file"
-                                            >
-                                                <LucideIcon name="X" className="lucide sm" />
-                                            </button>
-                                            <button
-                                                onClick={handleUpload}
-                                                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                                            >
-                                                Upload & Process
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
+                            <h3 className="text-lg font-medium text-gray-900">Average Price</h3>
+                            <p className="text-2xl font-bold text-gray-900">${stats.averagePrice}</p>
                         </div>
-
                         <div className="bg-white rounded-lg shadow p-6">
-                            <h3 className="text-lg font-medium text-gray-900 mb-4">API Integration</h3>
-                            <div className="bg-gray-50 rounded-lg p-4">
-                                <h4 className="font-medium mb-2">RESTful API Endpoints</h4>
-                                <div className="space-y-2 text-sm font-mono">
-                                    <div className="flex justify-between">
-                                        <span>POST /api/products</span>
-                                        <span className="text-green-600">Upload products</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span>GET /api/products/{id}/golden</span>
-                                        <span className="text-blue-600">Get golden record</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span>GET /api/duplicates</span>
-                                        <span className="text-purple-600">List duplicate groups</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span>POST /api/golden-records/export</span>
-                                        <span className="text-orange-600">Export golden records</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="mt-4 p-3 bg-yellow-50 border-l-4 border-yellow-400">
-                                <p className="text-sm text-yellow-700">
-                                    <strong>Demo Note:</strong> This is a frontend-only demo. In production, these endpoints would connect to your backend API.
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                );
-            };
-
-            // Render current view
-            const renderCurrentView = () => {
-                switch (currentView) {
-                    case 'dashboard':
-                        return <Dashboard />;
-                    case 'duplicates':
-                        return <DuplicateGroups />;
-                    case 'products':
-                        return <ProductsList />;
-                    case 'upload':
-                        return <UploadComponent />;
-                    default:
-                        return <Dashboard />;
-                }
-            };
-
-            return (
-                <div className="min-h-screen bg-gray-100">
-                    <Navigation />
-                    <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-                        {renderCurrentView()}
-                    </main>
-                    
-                    {/* Footer */}
-                    <footer className="bg-white border-t mt-12">
-                        <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
-                            <div className="flex justify-between items-center">
-                                <p className="text-sm text-gray-500">
-                                    GoldenRecord Pro - Product Data Deduplication System
-                                </p>
-                                <p className="text-sm text-gray-500">
-                                    Built with React & Tailwind CSS
-                                </p>
-                            </div>
-                        </div>
-                    </footer>
-                </div>
-            );
-        };
-
-        // Render the app
-        ReactDOM.render(<App />, document.getElementById('root'));
-    </script>
-</body>
-</html>
+                            <h3 className="text-lg font-medium text-gray-900">Low Inventory</h3>
+                            <p className="text-2xl font-bold text-red-600">{stats.lowInventoryItems
