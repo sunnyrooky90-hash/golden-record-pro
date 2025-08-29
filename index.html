@@ -536,11 +536,20 @@
 
             // Products List Component
             const ProductsList = () => {
-                const filteredProducts = products.filter(product => 
-                    product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    product.sku.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    product.brand.toLowerCase().includes(searchQuery.toLowerCase())
-                );
+                const [localSearchQuery, setLocalSearchQuery] = useState('');
+                
+                const filteredProducts = products.filter(product => {
+                    const query = localSearchQuery.toLowerCase();
+                    return (
+                        product.name.toLowerCase().includes(query) ||
+                        product.sku.toLowerCase().includes(query) ||
+                        product.brand.toLowerCase().includes(query) ||
+                        product.category.toLowerCase().includes(query) ||
+                        product.description.toLowerCase().includes(query) ||
+                        product.price.toString().includes(query) ||
+                        product.status.toLowerCase().includes(query)
+                    );
+                });
 
                 return (
                     <div className="space-y-6">
@@ -549,19 +558,35 @@
                                 <LucideIcon name="Search" className="lucide absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                                 <input
                                     type="text"
-                                    placeholder="Search products..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Search by name, SKU, brand, category, price, description..."
+                                    value={localSearchQuery}
+                                    onChange={(e) => setLocalSearchQuery(e.target.value)}
+                                    className="pl-10 pr-4 py-2 w-80 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 />
+                                {localSearchQuery && (
+                                    <button
+                                        onClick={() => setLocalSearchQuery('')}
+                                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                    >
+                                        <LucideIcon name="X" className="lucide sm" />
+                                    </button>
+                                )}
                             </div>
-                            <button 
-                                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                                onClick={() => alert('Export functionality would download CSV/JSON of golden records')}
-                            >
-                                <LucideIcon name="Download" className="lucide sm mr-2" />
-                                Export Golden Records
-                            </button>
+                            <div className="flex items-center space-x-2">
+                                <span className="text-sm text-gray-500">
+                                    {filteredProducts.length} of {products.length} products
+                                </span>
+                                <button 
+                                    className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                                    onClick={() => {
+                                        const goldenRecords = products.filter(p => p.status === 'active');
+                                        alert(`Exporting ${goldenRecords.length} golden records...`);
+                                    }}
+                                >
+                                    <LucideIcon name="Download" className="lucide sm mr-2" />
+                                    Export Golden Records
+                                </button>
+                            </div>
                         </div>
 
                         <div className="bg-white shadow rounded-lg overflow-hidden">
@@ -618,21 +643,80 @@
 
             // Upload Component
             const UploadComponent = () => {
+                const [dragActive, setDragActive] = useState(false);
+                
+                const handleFiles = (files) => {
+                    if (files.length > 0) {
+                        const file = files[0];
+                        if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+                            setSelectedFile(file);
+                        } else {
+                            alert('Please select a CSV file');
+                        }
+                    }
+                };
+
                 const handleFileChange = (e) => {
-                    setSelectedFile(e.target.files[0]);
+                    handleFiles(e.target.files);
+                };
+
+                const handleDrag = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.type === "dragenter" || e.type === "dragover") {
+                        setDragActive(true);
+                    } else if (e.type === "dragleave") {
+                        setDragActive(false);
+                    }
+                };
+
+                const handleDrop = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDragActive(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                        handleFiles(e.dataTransfer.files);
+                    }
                 };
 
                 const handleUpload = () => {
                     if (selectedFile) {
-                        // Simulate file upload and add mock products
-                        const newProducts = [
-                            { id: Date.now(), sku: 'UPLOAD001', name: 'Uploaded Product 1', brand: 'Test Brand', category: 'Test', price: 199, description: 'Uploaded via CSV', status: 'active' },
-                            { id: Date.now() + 1, sku: 'UPLOAD002', name: 'Uploaded Product 2', brand: 'Test Brand', category: 'Test', price: 299, description: 'Another uploaded product', status: 'active' }
-                        ];
-                        setProducts([...products, ...newProducts]);
-                        setSelectedFile(null);
-                        alert('Products uploaded successfully! Check the Products tab to see them.');
+                        // Simulate processing the CSV file
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            // In a real app, you'd parse the CSV here
+                            const newProducts = [
+                                { 
+                                    id: Date.now(), 
+                                    sku: 'UPLOAD001', 
+                                    name: 'Uploaded Product 1', 
+                                    brand: 'Test Brand', 
+                                    category: 'Electronics', 
+                                    price: 199, 
+                                    description: `Uploaded from ${selectedFile.name}`, 
+                                    status: 'active' 
+                                },
+                                { 
+                                    id: Date.now() + 1, 
+                                    sku: 'UPLOAD002', 
+                                    name: 'Uploaded Product 2', 
+                                    brand: 'Test Brand', 
+                                    category: 'Electronics', 
+                                    price: 299, 
+                                    description: `Another product from ${selectedFile.name}`, 
+                                    status: 'active' 
+                                }
+                            ];
+                            setProducts(prevProducts => [...prevProducts, ...newProducts]);
+                            setSelectedFile(null);
+                            alert(`Successfully uploaded ${newProducts.length} products from ${selectedFile.name}! Check the Products tab to see them.`);
+                        };
+                        reader.readAsText(selectedFile);
                     }
+                };
+
+                const removeFile = () => {
+                    setSelectedFile(null);
                 };
 
                 return (
@@ -640,41 +724,67 @@
                         <div className="bg-white rounded-lg shadow p-6">
                             <h3 className="text-lg font-medium text-gray-900 mb-4">Upload Product Data</h3>
                             
-                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6">
+                            <div 
+                                className={`border-2 border-dashed rounded-lg p-6 transition-colors ${
+                                    dragActive ? 'border-blue-400 bg-blue-50' : 'border-gray-300'
+                                }`}
+                                onDragEnter={handleDrag}
+                                onDragLeave={handleDrag}
+                                onDragOver={handleDrag}
+                                onDrop={handleDrop}
+                            >
                                 <div className="text-center">
                                     <LucideIcon name="Upload" className="lucide lg mx-auto text-gray-400" />
                                     <div className="mt-4">
                                         <label htmlFor="file-upload" className="cursor-pointer">
                                             <span className="mt-2 block text-sm font-medium text-gray-900">
-                                                Upload a CSV file
+                                                Click to upload or drag and drop a CSV file
                                             </span>
                                             <input 
                                                 id="file-upload" 
                                                 name="file-upload" 
                                                 type="file" 
-                                                accept=".csv" 
+                                                accept=".csv,text/csv" 
                                                 className="sr-only" 
-                                                onChange={handleFileChange} 
+                                                onChange={handleFileChange}
+                                                onClick={(e) => e.target.value = null} // Allow re-selecting same file
                                             />
                                         </label>
                                         <p className="mt-1 text-sm text-gray-500">CSV files up to 10MB</p>
+                                        <p className="mt-1 text-xs text-gray-400">
+                                            Expected columns: sku, name, brand, category, price, description
+                                        </p>
                                     </div>
                                 </div>
                             </div>
 
                             {selectedFile && (
-                                <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                                <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
                                     <div className="flex items-center justify-between">
-                                        <div>
-                                            <p className="text-sm font-medium text-blue-900">{selectedFile.name}</p>
-                                            <p className="text-sm text-blue-700">{(selectedFile.size / 1024).toFixed(2)} KB</p>
+                                        <div className="flex items-center space-x-3">
+                                            <LucideIcon name="FileText" className="lucide text-blue-600" />
+                                            <div>
+                                                <p className="text-sm font-medium text-blue-900">{selectedFile.name}</p>
+                                                <p className="text-sm text-blue-700">
+                                                    {(selectedFile.size / 1024).toFixed(2)} KB • Last modified: {new Date(selectedFile.lastModified).toLocaleDateString()}
+                                                </p>
+                                            </div>
                                         </div>
-                                        <button
-                                            onClick={handleUpload}
-                                            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                                        >
-                                            Upload
-                                        </button>
+                                        <div className="flex items-center space-x-2">
+                                            <button
+                                                onClick={removeFile}
+                                                className="p-1 text-gray-400 hover:text-gray-600"
+                                                title="Remove file"
+                                            >
+                                                <LucideIcon name="X" className="lucide sm" />
+                                            </button>
+                                            <button
+                                                onClick={handleUpload}
+                                                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                                            >
+                                                Upload & Process
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             )}
